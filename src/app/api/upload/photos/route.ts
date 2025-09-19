@@ -120,12 +120,21 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    console.log(`Starting Azure upload for ${photos.length} photos to model ${modelId}`)
+    
     // Upload photos to Azure Blob Storage
     const uploadResult = await azureStorage.uploadPhotos(
       photos,
       modelId,
       session.user.id
     )
+    
+    console.log(`Azure upload result:`, {
+      success: uploadResult.success,
+      uploadedCount: uploadResult.uploadedFiles.length,
+      errorCount: uploadResult.errors.length,
+      errors: uploadResult.errors
+    })
 
     if (!uploadResult.success) {
       return NextResponse.json(

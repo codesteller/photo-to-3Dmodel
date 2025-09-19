@@ -52,8 +52,8 @@ class StabilityAI {
         throw new Error(`Background removal failed: ${response.statusText}`)
       }
 
-      const imageBuffer = await response.arrayBuffer()
-      const base64Image = Buffer.from(imageBuffer).toString('base64')
+      const responseBuffer = await response.arrayBuffer()
+      const base64Image = Buffer.from(responseBuffer).toString('base64')
 
       return {
         success: true,
@@ -329,9 +329,38 @@ class StabilityAI {
   }
 }
 
-// Helper function to download image from URL
+// Helper function to download image from URL with SAS token support
 export async function downloadImageFromUrl(url: string): Promise<Buffer> {
   try {
+    // Import azureStorage at runtime to avoid circular dependencies
+    const { azureStorage } = await import('./azure-storage')
+    
+    // Check if this is an Azure blob URL that needs SAS token
+    if (url.includes('.blob.core.windows.net/')) {
+      try {
+        // Extract blob path from URL
+        const urlParts = url.split('/')
+        const containerIndex = urlParts.findIndex(part => part === 'photo-to-3d-uploads')
+        if (containerIndex !== -1) {
+          const pathSegments = urlParts.slice(containerIndex + 1)
+          const blobPath = pathSegments.join('/')
+          
+          // Generate SAS token URL
+          const sasUrl = await azureStorage.generateDownloadUrl(blobPath, 60)
+          if (sasUrl) {
+            const response = await fetch(sasUrl)
+            if (response.ok) {
+              const arrayBuffer = await response.arrayBuffer()
+              return Buffer.from(arrayBuffer)
+            }
+          }
+        }
+      } catch (sasError) {
+        console.warn('Failed to use SAS token, trying original URL:', sasError)
+      }
+    }
+    
+    // Fallback to original URL
     const response = await fetch(url)
     if (!response.ok) {
       throw new Error(`Failed to download image: ${response.statusText}`)

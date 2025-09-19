@@ -13,6 +13,79 @@ interface BackgroundRemovedImage {
   createdAt: string
 }
 
+function SecureImage({ fileUrl, alt, className, filename }: { 
+  fileUrl: string; 
+  alt: string; 
+  className?: string; 
+  filename: string;
+}) {
+  const [secureUrl, setSecureUrl] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    const getUrl = async () => {
+      try {
+        // Extract the blob path from the URL
+        const urlParts = fileUrl.split('/')
+        const containerIndex = urlParts.findIndex(part => part === 'photo-to-3d-uploads')
+        if (containerIndex === -1) {
+          setSecureUrl(fileUrl)
+          setLoading(false)
+          return
+        }
+        
+        const pathSegments = urlParts.slice(containerIndex + 1)
+        const apiPath = pathSegments.join('/')
+        
+        // Get secure download URL from our API
+        const response = await fetch(`/api/download/${apiPath}`)
+        if (!response.ok) {
+          throw new Error('Failed to get secure URL')
+        }
+        
+        const { downloadUrl } = await response.json()
+        setSecureUrl(downloadUrl)
+      } catch (error) {
+        console.error('Failed to get secure URL:', error)
+        setError(true)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    getUrl()
+  }, [fileUrl])
+
+  if (loading) {
+    return (
+      <div className={`bg-gray-200 animate-pulse rounded-md flex items-center justify-center ${className}`}>
+        <div className="text-gray-400">Loading...</div>
+      </div>
+    )
+  }
+
+  if (error || !secureUrl) {
+    return (
+      <div className={`bg-gray-100 rounded-md flex items-center justify-center ${className}`}>
+        <div className="text-center text-gray-400">
+          <div className="text-2xl mb-1">🖼️</div>
+          <div className="text-xs">Image unavailable</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <img 
+      src={secureUrl}
+      alt={alt}
+      className={className}
+      onError={() => setError(true)}
+    />
+  )
+}
+
 interface PhotoUpload {
   id: string
   filename: string
@@ -87,6 +160,65 @@ export default function ModelPage({ params }: { params: Promise<{ id: string }> 
     const sizes = ['Bytes', 'KB', 'MB', 'GB']
     const i = Math.floor(Math.log(size) / Math.log(k))
     return parseFloat((size / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  const handleSecureDownload = async (fileUrl: string, filename: string) => {
+    try {
+      // Extract the blob path from the URL
+      const urlParts = fileUrl.split('/')
+      const containerIndex = urlParts.findIndex(part => part === 'photo-to-3d-uploads')
+      if (containerIndex === -1) {
+        throw new Error('Invalid file URL')
+      }
+      
+      const pathSegments = urlParts.slice(containerIndex + 1)
+      const apiPath = pathSegments.join('/')
+      
+      // Get secure download URL from our API
+      const response = await fetch(`/api/download/${apiPath}`)
+      if (!response.ok) {
+        throw new Error('Failed to get download URL')
+      }
+      
+      const { downloadUrl } = await response.json()
+      
+      // Create temporary link and trigger download
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Download failed:', error)
+      alert('Download failed. Please try again.')
+    }
+  }
+
+  const getSecureImageUrl = async (fileUrl: string) => {
+    try {
+      // Extract the blob path from the URL
+      const urlParts = fileUrl.split('/')
+      const containerIndex = urlParts.findIndex(part => part === 'photo-to-3d-uploads')
+      if (containerIndex === -1) {
+        return fileUrl // Return original URL if can't parse
+      }
+      
+      const pathSegments = urlParts.slice(containerIndex + 1)
+      const apiPath = pathSegments.join('/')
+      
+      // Get secure download URL from our API
+      const response = await fetch(`/api/download/${apiPath}`)
+      if (!response.ok) {
+        return fileUrl // Return original URL on error
+      }
+      
+      const { downloadUrl } = await response.json()
+      return downloadUrl
+    } catch (error) {
+      console.error('Failed to get secure URL:', error)
+      return fileUrl // Return original URL on error
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -205,24 +337,20 @@ export default function ModelPage({ params }: { params: Promise<{ id: string }> 
                           photo.backgroundRemovedImage ? (
                             <div key={photo.id} className="bg-gray-50 rounded-lg p-3">
                               <div className="aspect-square bg-white rounded-md mb-2 flex items-center justify-center">
-                                <img 
-                                  src={photo.backgroundRemovedImage.fileUrl}
+                                <SecureImage
+                                  fileUrl={photo.backgroundRemovedImage.fileUrl}
                                   alt={`Background removed ${index + 1}`}
                                   className="max-w-full max-h-full object-contain rounded-md"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRjNGNEY2Ii8+CjxwYXRoIGQ9Ik0yMCAyNUMyMi43NjE0IDI1IDI1IDIyLjc2MTQgMjUgMjBDMjUgMTcuMjM4NiAyMi43NjE0IDE1IDIwIDE1QzE3LjIzODYgMTUgMTUgMTcuMjM4NiAxNSAyMEMxNSAyMi43NjE0IDE3LjIzODYgMjUgMjAgMjVaIiBmaWxsPSIjOUNBM0FGII+PC9wYXRoPgo8L3N2Zz4K';
-                                  }}
+                                  filename={photo.backgroundRemovedImage.filename}
                                 />
                               </div>
                               <p className="text-xs text-gray-600 text-center mb-2">{formatFileSize(photo.backgroundRemovedImage.fileSize)}</p>
-                              <a
-                                href={photo.backgroundRemovedImage.fileUrl}
-                                download={photo.backgroundRemovedImage.filename}
+                              <button
+                                onClick={() => handleSecureDownload(photo.backgroundRemovedImage!.fileUrl, photo.backgroundRemovedImage!.filename)}
                                 className="w-full bg-green-600 text-white px-2 py-1 rounded text-xs font-medium hover:bg-green-700 transition-colors flex items-center justify-center"
                               >
                                 📥 Download
-                              </a>
+                              </button>
                             </div>
                           ) : null
                         )}
@@ -253,12 +381,12 @@ export default function ModelPage({ params }: { params: Promise<{ id: string }> 
                                 {formatFileSize(exportFile.fileSize)}
                               </p>
                             </div>
-                            <a
-                              href={exportFile.fileUrl}
+                            <button
+                              onClick={() => handleSecureDownload(exportFile.fileUrl, `model.${exportFile.format.toLowerCase()}`)}
                               className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
                             >
                               Download
-                            </a>
+                            </button>
                           </div>
                         </div>
                       ))}
