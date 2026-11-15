@@ -1,6 +1,6 @@
 // Azure Blob Storage service for file uploads and management
 
-import { BlobServiceClient, StorageSharedKeyCredential, BlockBlobUploadResponse } from '@azure/storage-blob'
+import { BlobServiceClient, StorageSharedKeyCredential, BlockBlobUploadResponse, generateBlobSASQueryParameters, BlobSASPermissions } from '@azure/storage-blob'
 
 interface AzureConfig {
   accountName: string
@@ -63,7 +63,7 @@ class AzureBlobStorage {
 
     try {
       const containerClient = this.blobServiceClient.getContainerClient(this.containerName)
-      // Don't set public access since it's disabled on the storage account
+      // Create container without public access (since account has AllowBlobPublicAccess disabled)
       await containerClient.createIfNotExists()
       return true
     } catch (error) {
@@ -182,6 +182,39 @@ class AzureBlobStorage {
     }
   }
 
+  // Generate a SAS URL for secure downloads
+  async generateDownloadUrl(
+    blobName: string,
+    expiryMinutes: number = 60
+  ): Promise<string | null> {
+    if (!this.blobServiceClient) {
+      console.error('Azure Blob Storage client not initialized')
+      return null
+    }
+
+    try {
+      const containerClient = this.blobServiceClient.getContainerClient(this.containerName)
+      const blockBlobClient = containerClient.getBlockBlobClient(blobName)
+
+      // Generate SAS token for download
+      const expiryTime = new Date()
+      expiryTime.setMinutes(expiryTime.getMinutes() + expiryMinutes)
+
+      const sasToken = generateBlobSASQueryParameters({
+        containerName: this.containerName,
+        blobName: blobName,
+        permissions: BlobSASPermissions.parse('r'), // Read permission
+        startsOn: new Date(),
+        expiresOn: expiryTime,
+      }, new StorageSharedKeyCredential(this.config.accountName, this.config.accountKey)).toString()
+
+      return `${blockBlobClient.url}?${sasToken}`
+    } catch (error) {
+      console.error('Failed to generate download URL:', error)
+      return null
+    }
+  }
+
   // Generate a presigned URL for direct upload (if needed)
   async generatePresignedUrl(
     fileName: string,
@@ -202,9 +235,15 @@ class AzureBlobStorage {
       const expiryTime = new Date()
       expiryTime.setMinutes(expiryTime.getMinutes() + expiryMinutes)
 
-      // Note: For production, you'd want to implement proper SAS token generation
-      // This is a simplified approach - in production, use generateBlobSASQueryParameters
-      return blockBlobClient.url
+      const sasToken = generateBlobSASQueryParameters({
+        containerName: this.containerName,
+        blobName: blobName,
+        permissions: BlobSASPermissions.parse('rw'), // Read/Write permission
+        startsOn: new Date(),
+        expiresOn: expiryTime,
+      }, new StorageSharedKeyCredential(this.config.accountName, this.config.accountKey)).toString()
+
+      return `${blockBlobClient.url}?${sasToken}`
     } catch (error) {
       console.error('Failed to generate presigned URL:', error)
       return null
